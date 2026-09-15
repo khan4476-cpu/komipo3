@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>한국어 형태소 분석 및 단어 빈도 분석기</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- SheetJS (xlsx parser) -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Google Fonts Inter & Noto Sans KR -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Noto Sans KR', 'Inter', sans-serif;
+            background-color: #f8fafc;
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f5f9;
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+        .word-cloud-item {
+            transition: all 0.2s ease;
+            display: inline-block;
+            margin: 4px;
+            padding: 4px 10px;
+            border-radius: 9999px;
+            cursor: pointer;
+        }
+        .word-cloud-item:hover {
+            transform: scale(1.15);
+            z-index: 10;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+    </style>
+</head>
+<body class="text-slate-800 min-h-screen flex flex-col">
+
+    <header class="bg-indigo-700 text-white shadow-lg sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-wrap justify-between items-center gap-4">
+            <div class="flex items-center space-x-3">
+                <div class="p-2 bg-indigo-600 rounded-lg shadow-inner">
+                    <i class="fa-solid font-bold fa-file-word text-2xl text-indigo-200"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold tracking-tight">한국어 형태소 분석 & 단어 빈도 분석기</h1>
+                    <p class="text-xs text-indigo-200">CSV/XLSX 파일 업로드 기반 명사 추출 및 빈도 시각화</p>
+                </div>
+            </div>
+            <div class="flex items-center space-x-2">
+                <button onclick="loadSampleData()" class="px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-indigo-100 rounded-lg transition duration-200 flex items-center space-x-1 shadow-sm">
+                    <i class="fa-solid fa-flask text-indigo-300"></i>
+                    <span>샘플 데이터로 체험</span>
+                </button>
+                <button onclick="resetAll()" class="px-3 py-1.5 text-xs font-medium bg-slate-600 hover:bg-slate-500 text-slate-100 rounded-lg transition duration-200 flex items-center space-x-1">
+                    <i class="fa-solid fa-rotate-right"></i>
+                    <span>초기화</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-grow w-full space-y-8">
+
+        <!-- Step 1 & 2: File Upload and Column Selection Bar -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- Step 1: File Upload Card -->
+            <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center space-x-2 mb-3">
+                        <span class="flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 font-bold text-xs">1</span>
+                        <h2 class="text-base font-bold text-slate-800">파일 업로드 (CSV / XLSX)</h2>
+                    </div>
+                    <p class="text-xs text-slate-500 mb-4">분석하고자 하는 Excel 또는 CSV 텍스트 파일을 드래그하거나 선택하세요.</p>
+                </div>
+
+                <!-- Dropzone -->
+                <div id="dropzone" onclick="document.getElementById('fileInput').click()" 
+                     class="border-2 border-dashed border-slate-300 hover:border-indigo-500 hover:bg-indigo-50/50 rounded-xl p-6 text-center cursor-pointer transition duration-200 flex flex-col items-center justify-center space-y-2">
+                    <i class="fa-solid fa-cloud-arrow-up text-3xl text-slate-400"></i>
+                    <p class="text-xs font-medium text-slate-600">파일을 여기에 드롭하거나 <span class="text-indigo-600 underline">클릭</span>하세요</p>
+                    <p class="text-[10px] text-slate-400">지원 형식: .xlsx, .xls, .csv</p>
+                    <input type="file" id="fileInput" accept=".csv, .xlsx, .xls" class="hidden" onchange="handleFileSelect(event)">
+                </div>
+
+                <!-- File info status -->
+                <div id="fileStatus" class="hidden mt-3 p-3 bg-indigo-50 rounded-lg flex items-center justify-between text-xs text-indigo-900 border border-indigo-100">
+                    <div class="flex items-center space-x-2 truncate">
+                        <i class="fa-solid fa-file-excel text-indigo-600"></i>
+                        <span id="fileNameDisplay" class="font-semibold truncate">data.xlsx</span>
+                    </div>
+                    <span id="fileRowCount" class="text-[11px] bg-indigo-200 text-indigo-800 px-2 py-0.5 rounded-full font-medium">0행</span>
+                </div>
+            </div>
+
+            <!-- Step 2: Column Selection & Filtering Options -->
+            <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex flex-col justify-between lg:col-span-2">
+                <div>
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center space-x-2">
+                            <span class="flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 font-bold text-xs">2</span>
+                            <h2 class="text-base font-bold text-slate-800">컬럼 선택 및 분석 옵션 설정</h2>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- Target Column Selector -->
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-700 mb-1">분석할 컬럼 선택</label>
+                            <select id="columnSelect" disabled class="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:opacity-50">
+                                <option value="">파일을 먼저 업로드하세요</option>
+                            </select>
+                        </div>
+
+                        <!-- Minimum Noun Length -->
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-700 mb-1">최소 명사 길이</label>
+                            <select id="minLenSelect" class="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                                <option value="1">1자 이상 (모든 명사 포함)</option>
+                                <option value="2" selected>2자 이상 (추천: 1자 한글 제거)</option>
+                                <option value="3">3자 이상</option>
+                            </select>
+                        </div>
+
+                        <!-- N-Gram Mode Selection -->
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-700 mb-1">분석 단위 (N-Gram)</label>
+                            <select id="ngramSelect" class="w-full text-xs p-2.5 bg-indigo-50/60 border border-indigo-200 font-medium text-indigo-900 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                                <option value="1">1-Gram (단일 명사)</option>
+                                <option value="2" selected>2-Gram (바이그램 / 2연속 명사)</option>
+                                <option value="both">1-Gram + 2-Gram (단일명사 & 바이그램 혼합)</option>
+                            </select>
+                        </div>
+
+                        <!-- Stopwords Quick Field -->
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-700 mb-1">제외할 단어 (불용어, 쉼표 구분)</label>
+                            <input type="text" id="stopWordsInput" value="것, 수, 적, 등, 때, 이, 그, 저, 바, 경우, 중, 위해, 매, 제, 개, 상기, 발명, 정보, 관한 것이다, 특징 한다, 관한 것으로서, 포함하 특징, 시스템 관한, 방법 관한, 특징한다, 포함, 있다, 포함하, 통해, 형성되, 제1, 따라, 것이다, 관한" 
+                                   class="w-full text-xs p-2 bg-slate-50 border border-slate-300 rounded-lg focus:ring-1 focus:ring-indigo-500" placeholder="예: 것, 수, 또한, 등">
+                        </div>
+
+                        <!-- Analysis Flags -->
+                        <div class="flex items-center space-x-4 pt-1 md:col-span-2">
+                            <label class="inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="includeEng" class="sr-only peer">
+                                <div class="w-8 h-4.5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-indigo-600 relative"></div>
+                                <span class="ml-2 text-xs text-slate-700">영문 단어 포함</span>
+                            </label>
+                            <label class="inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="includeNum" class="sr-only peer">
+                                <div class="w-8 h-4.5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-indigo-600 relative"></div>
+                                <span class="ml-2 text-xs text-slate-700">숫자 포함</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Run Analysis Button -->
+                <div class="mt-4 pt-3 border-t border-slate-100 flex justify-end">
+                    <button id="runBtn" onclick="runMorphAnalysis()" disabled 
+                            class="w-full sm:w-auto px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-xl shadow-md transition duration-200 flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                        <span>형태소 분석 및 명사 추출 실행</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Analysis Results Dashboard Section -->
+        <div id="resultsSection" class="hidden space-y-6">
+
+            <!-- Stat Summary Cards -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-200 flex items-center space-x-4">
+                    <div class="p-3 bg-blue-50 text-blue-600 rounded-lg">
+                        <i class="fa-solid fa-list-ol text-xl"></i>
+                    </div>
+                    <div>
+                        <p class="text-[11px] font-medium text-slate-500">분석 행 수</p>
+                        <p id="statTotalRows" class="text-lg font-bold text-slate-800">0</p>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-200 flex items-center space-x-4">
+                    <div class="p-3 bg-emerald-50 text-emerald-600 rounded-lg">
+                        <i class="fa-solid fa-align-left text-xl"></i>
+                    </div>
+                    <div>
+                        <p class="text-[11px] font-medium text-slate-500">총 어절 (토큰)</p>
+                        <p id="statTotalTokens" class="text-lg font-bold text-slate-800">0</p>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-200 flex items-center space-x-4">
+                    <div class="p-3 bg-amber-50 text-amber-600 rounded-lg">
+                        <i class="fa-solid fa-cubes text-xl"></i>
+                    </div>
+                    <div>
+                        <p class="text-[11px] font-medium text-slate-500">추출 키워드/바이그램 수</p>
+                        <p id="statTotalNouns" class="text-lg font-bold text-slate-800">0</p>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-200 flex items-center space-x-4">
+                    <div class="p-3 bg-purple-50 text-purple-600 rounded-lg">
+                        <i class="fa-solid fa-fingerprint text-xl"></i>
+                    </div>
+                    <div>
+                        <p class="text-[11px] font-medium text-slate-500">고유 항목 종류</p>
+                        <p id="statUniqueNouns" class="text-lg font-bold text-slate-800">0</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Content Display Tabs -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                <!-- Tab Header -->
+                <div class="border-b border-slate-200 bg-slate-50/50 px-6 py-3 flex flex-wrap justify-between items-center gap-2">
+                    <div class="flex space-x-2">
+                        <button onclick="switchTab('chart')" id="tabBtn-chart" class="px-4 py-2 text-xs font-semibold rounded-lg bg-indigo-600 text-white shadow-sm transition">
+                            <i class="fa-solid fa-chart-bar mr-1.5"></i> 빈도 차트 (Top 20)
+                        </button>
+                        <button onclick="switchTab('cloud')" id="tabBtn-cloud" class="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-200 text-slate-700 hover:bg-slate-300 transition">
+                            <i class="fa-solid fa-cloud mr-1.5"></i> 워드 클라우드
+                        </button>
+                        <button onclick="switchTab('table')" id="tabBtn-table" class="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-200 text-slate-700 hover:bg-slate-300 transition">
+                            <i class="fa-solid fa-table-list mr-1.5"></i> 상세 빈도표
+                        </button>
+                        <button onclick="switchTab('preview')" id="tabBtn-preview" class="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-200 text-slate-700 hover:bg-slate-300 transition">
+                            <i class="fa-solid fa-eye mr-1.5"></i> 형태소 추출 미리보기
+                        </button>
+                    </div>
+
+                    <!-- Export Actions -->
+                    <div class="flex items-center space-x-2">
+                        <button onclick="exportToCSV()" class="px-3 py-1.5 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition flex items-center space-x-1 shadow-sm">
+                            <i class="fa-solid fa-file-csv"></i>
+                            <span>결과 CSV 다운로드</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Tab Body Content Area -->
+                <div class="p-6">
+                    <!-- Tab 1: Chart View -->
+                    <div id="tabContent-chart" class="block space-y-4">
+                        <div class="flex justify-between items-center">
+                            <h3 class="text-sm font-bold text-slate-800">단어 출현 빈도 상위 차트</h3>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-xs text-slate-500">표시 개수:</span>
+                                <select id="chartLimit" onchange="renderChart()" class="text-xs border border-slate-300 rounded px-2 py-1">
+                                    <option value="10">상위 10개</option>
+                                    <option value="20" selected>상위 20개</option>
+                                    <option value="30">상위 30개</option>
+                                    <option value="50">상위 50개</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="relative h-96 w-full">
+                            <canvas id="freqChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Tab 2: Word Cloud View -->
+                    <div id="tabContent-cloud" class="hidden space-y-4">
+                        <p class="text-xs text-slate-500">빈도가 높은 단어일수록 크고 선명하게 표시됩니다. 클릭시 해당 단어를 제외 목록에 추가할 수 있습니다.</p>
+                        <div id="wordCloudContainer" class="min-h-[350px] p-6 bg-slate-50 rounded-xl border border-slate-200 flex flex-wrap justify-center items-center gap-2 custom-scrollbar max-h-[500px] overflow-y-auto">
+                            <!-- Dynamically generated word cloud -->
+                        </div>
+                    </div>
+
+                    <!-- Tab 3: Detailed Frequency Table -->
+                    <div id="tabContent-table" class="hidden space-y-4">
+                        <div class="flex flex-wrap justify-between items-center gap-2">
+                            <input type="text" id="tableSearch" onkeyup="filterTable()" placeholder="단어/바이그램 검색..." 
+                                   class="text-xs p-2 border border-slate-300 rounded-lg w-full sm:w-64 focus:ring-1 focus:ring-indigo-500">
+                            <span id="tableResultCount" class="text-xs text-slate-500">총 0개 항목</span>
+                        </div>
+
+                        <div class="overflow-x-auto border border-slate-200 rounded-xl">
+                            <table class="w-full text-left text-xs text-slate-700">
+                                <thead class="bg-slate-100 text-slate-700 uppercase text-[11px] font-bold">
+                                    <tr>
+                                        <th class="py-3 px-4 w-16 text-center">순위</th>
+                                        <th class="py-3 px-4">명사 / 바이그램 키워드</th>
+                                        <th class="py-3 px-4 text-right">빈도수 (회)</th>
+                                        <th class="py-3 px-4">비율 (%)</th>
+                                        <th class="py-3 px-4 text-center w-28">제외 설정</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="frequencyTableBody" class="divide-y divide-slate-200">
+                                    <!-- Table Rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Tab 4: Sentence & Morph Analysis Sample Preview -->
+                    <div id="tabContent-preview" class="hidden space-y-4">
+                        <p class="text-xs text-slate-500">원본 문장이 어떻게 토큰화되고 명사가 추출되는지 상위 10개 행의 샘플을 확인합니다.</p>
+                        <div id="samplePreviewList" class="space-y-3 custom-scrollbar max-h-[500px] overflow-y-auto pr-2">
+                            <!-- Preview Cards -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="bg-white border-t border-slate-200 py-4 mt-8 text-center text-xs text-slate-500">
+        <p>순수 자바스크립트 기반 한글 형태소 분리 엔진 | 브라우저 내 로컬 데이터 처리 (데이터 서버 전송 없음)</p>
+    </footer>
+
+    <script>
+        /**
+         * Global Application State
+         */
+        let parsedData = [];       // Raw parsed rows from CSV/XLSX
+        let columnNames = [];      // Sheet headers
+        let analysisResults = [];  // Sorted frequency list [{word, count, percentage}]
+        let totalNounCount = 0;    // Total sum of noun frequencies
+        let chartInstance = null;  // Chart.js instance
+        let rawSamplePreviews = [];// Sample sentence morph output
+
+        /**
+         * Korean Hangul Decomposition & Rule-Based Morphological Analyzer
+         * Strips standard Korean Josa (조사) & Affixes to isolate nouns accurately in JS.
+         */
+        class KoreanMorphAnalyzer {
+            constructor() {
+                // List of standard Korean Josa ordered by length descending for longest-match stripping
+                this.josaList = [
+                    '에서는', '으로부터', '에야말로', '에서부터', '으로만', '에서만', '에게서', '에게는', '한테는', 
+                    '마저도', '조차도', '부터는', '까지는', '으로는', '에서는', '과의', '와의', '에의', '에서', 
+                    '으로', '에게', '한테', '부터', '까지', '조차', '마저', '처럼', '보다', '은는', '나마', 
+                    '대로', '따라', '마다', '은', '는', '이', '가', '을', '를', '의', '에', '로', '과', 
+                    '와', '도', '만', '아', '야', '며', '고', '랑', '등'
+                ];
+
+                // Suffixes that attach to nouns
+                this.nounSuffixes = ['들', '적', '화', '성', '스럽다', '스럽게'];
+            }
+
+            // Check if Hangul character has final consonant (받침)
+            hasBatchim(char) {
+                if (!char) return false;
+                const code = char.charCodeAt(0);
+                if (code < 0xAC00 || code > 0xD7A3) return false; // Not Hangul syllable
+                return (code - 0xAC00) % 28 !== 0;
+            }
+
+            // Clean noise symbols and non-letters except space
+            cleanText(text) {
+                if (typeof text !== 'string') text = String(text || '');
+                return text.replace(/[^\w\s가-힣]/g, ' ').replace(/\s+/g, ' ').trim();
+            }
+
+            // Tokenize sentence into clauses/words (어절)
+            tokenizeSentences(text) {
+                if (!text) return [];
+                return text.split(/(?<=[.?!])\s+|\n+/).filter(s => s.trim().length > 0);
+            }
+
+            // Extract candidate Noun from a single Korean token (어절)
+            extractNounFromToken(token, options = {}) {
+                token = token.trim();
+                if (!token) return null;
+
+                // 1. If token is pure English or Digits
+                if (/^[a-zA-Z]+$/.test(token)) {
+                    return options.includeEng ? token.toLowerCase() : null;
+                }
+                if (/^\d+$/.test(token)) {
+                    return options.includeNum ? token : null;
+                }
+
+                // Clean pure non-hangul suffixes
+                let word = token.replace(/[^가-힣a-zA-Z0-9]/g, '');
+                if (!word) return null;
+
+                // Korean Josa Stripping Algorithm
+                for (let josa of this.josaList) {
+                    if (word.endsWith(josa) && word.length > josa.length) {
+                        const stem = word.substring(0, word.length - josa.length);
+                        const lastChar = stem.charAt(stem.length - 1);
+                        const hasBatch = this.hasBatchim(lastChar);
+
+                        // Phonological validation rules for Korean Josa
+                        if (josa === '을' && !hasBatch) continue;
+                        if (josa === '를' && hasBatch) continue;
+                        if (josa === '은' && !hasBatch) continue;
+                        if (josa === '는' && hasBatch) continue;
+                        if (josa === '이' && !hasBatch) continue;
+                        if (josa === '가' && hasBatch) continue;
+
+                        word = stem;
+                        break; // Strip longest matching Josa only once per token
+                    }
+                }
+
+                // Minimum length check
+                const minLen = options.minLen || 1;
+                if (word.length < minLen) return null;
+
+                return word;
+            }
+
+            // Process full text content and return extracted nouns and bigrams
+            analyzeText(text, options = {}) {
+                const cleaned = this.cleanText(text);
+                const tokens = cleaned.split(/\s+/);
+                const nouns = [];
+
+                tokens.forEach(token => {
+                    const noun = this.extractNounFromToken(token, options);
+                    if (noun) {
+                        nouns.push(noun);
+                    }
+                });
+
+                // Generate N-Grams based on selected mode
+                const ngramMode = options.ngramMode || '1';
+                let resultItems = [];
+
+                if (ngramMode === '1') {
+                    resultItems = [...nouns];
+                } else if (ngramMode === '2') {
+                    for (let i = 0; i < nouns.length - 1; i++) {
+                        resultItems.push(`${nouns[i]} ${nouns[i + 1]}`);
+                    }
+                } else if (ngramMode === 'both') {
+                    resultItems = [...nouns];
+                    for (let i = 0; i < nouns.length - 1; i++) {
+                        resultItems.push(`${nouns[i]} ${nouns[i + 1]}`);
+                    }
+                }
+
+                return {
+                    originalTokensCount: tokens.length,
+                    extractedNouns: nouns,
+                    resultItems: resultItems
+                };
+            }
+        }
+
+        const analyzer = new KoreanMorphAnalyzer();
+
+        /**
+         * Handle File Selection via File Input
+         */
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file) {
+                parseFileData(file);
+            }
+        }
+
+        /**
+         * Parse CSV or XLSX File using SheetJS
+         */
+        function parseFileData(file) {
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const firstSheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[firstSheetName];
+
+                    parsedData = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+
+                    if (parsedData.length === 0) {
+                        alert("파일에 데이터가 없습니다.");
+                        return;
+                    }
+
+                    columnNames = Object.keys(parsedData[0]);
+                    populateColumnSelect(columnNames);
+
+                    // Update UI status
+                    document.getElementById('fileNameDisplay').textContent = file.name;
+                    document.getElementById('fileRowCount').textContent = `${parsedData.length.toLocaleString()}행`;
+                    document.getElementById('fileStatus').classList.remove('hidden');
+                    document.getElementById('runBtn').disabled = false;
+                } catch (err) {
+                    console.error("파일 파싱 오류:", err);
+                    alert("파일을 읽는 도중 오류가 발생했습니다. 올바른 CSV 또는 Excel 파일인지 확인해주세요.");
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        /**
+         * Populate Column Dropdown Menu
+         */
+        function populateColumnSelect(headers) {
+            const select = document.getElementById('columnSelect');
+            select.innerHTML = '<option value="">-- 분석할 컬럼 선택 --</option>';
+
+            headers.forEach(header => {
+                const opt = document.createElement('option');
+                opt.value = header;
+                opt.textContent = header;
+                select.appendChild(opt);
+            });
+
+            select.disabled = false;
+            if (headers.length > 0) {
+                select.selectedIndex = 1; // Default select first column
+            }
+        }
+
+        /**
+         * Load Sample Dataset for Instant Demo Testing
+         */
+        function loadSampleData() {
+            parsedData = [
+                { "고객리뷰": "이번에 새로 출시된 인공지능 한국어 분석 프로그램 서비스의 기능과 성능이 정말 만족스럽습니다." },
+                { "고객리뷰": "사용자 인터페이스 디자인이 깔끔하고 데이터 시각화 차트 결과가 직관적이어서 분석 작업 효율이 높아졌습니다." },
+                { "고객리뷰": "엑셀 파일 업로드 속도가 빠르고 텍스트 형태소 추출 정확도가 높아서 만족합니다." },
+                { "고객리뷰": "단어 빈도 분석 및 워드클라우드 시각화 기능이 마케팅 데이터 보고서 작성할 때 큰 도움이 됩니다." },
+                { "고객리뷰": "한국어 명사 추출 기능과 불용어 제외 단어 설정 기능이 대용량 데이터 분석에 유용합니다." },
+                { "고객리뷰": "서비스의 처리 속도 개선 및 인공지능 자연어 처리 기능 향상이 기대됩니다." },
+                { "고객리뷰": "보고서 다운로드 기능과 차트 이미지 저장 기능 덕분에 업무 시간이 단축되었습니다." },
+                { "고객리뷰": "클라우드 서비스 안정성이 높고 데이터 보안 측면에서도 안심하고 사용할 수 있습니다." }
+            ];
+
+            columnNames = ["고객리뷰"];
+            populateColumnSelect(columnNames);
+
+            document.getElementById('fileNameDisplay').textContent = "샘플_고객리뷰_데이터.xlsx";
+            document.getElementById('fileRowCount').textContent = `${parsedData.length}행`;
+            document.getElementById('fileStatus').classList.remove('hidden');
+            document.getElementById('runBtn').disabled = false;
+
+            // Run analysis immediately on sample data
+            runMorphAnalysis();
+        }
+
+        // Configure Drag & Drop Events
+        window.addEventListener('DOMContentLoaded', () => {
+            const dropzone = document.getElementById('dropzone');
+
+            dropzone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropzone.classList.add('border-indigo-500', 'bg-indigo-50');
+            });
+
+            dropzone.addEventListener('dragleave', (e) => {
+                e.preventDefault();
+                dropzone.classList.remove('border-indigo-500', 'bg-indigo-50');
+            });
+
+            dropzone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropzone.classList.remove('border-indigo-500', 'bg-indigo-50');
+                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                    parseFileData(e.dataTransfer.files[0]);
+                }
+            });
+        });
+
+        /**
+         * Run Morphological Noun & Bigram Analysis Execution
+         */
+        function runMorphAnalysis() {
+            const selectedCol = document.getElementById('columnSelect').value;
+            if (!selectedCol) {
+                alert("분석할 컬럼을 선택해 주세요.");
+                return;
+            }
+
+            const minLen = parseInt(document.getElementById('minLenSelect').value, 10);
+            const ngramMode = document.getElementById('ngramSelect').value;
+            const includeEng = document.getElementById('includeEng').checked;
+            const includeNum = document.getElementById('includeNum').checked;
+
+            // Stopwords array
+            const stopWordsRaw = document.getElementById('stopWordsInput').value;
+            const stopWordsSet = new Set(
+                stopWordsRaw.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+            );
+
+            const options = { minLen, ngramMode, includeEng, includeNum };
+
+            let totalTokens = 0;
+            const nounFreqMap = new Map();
+            rawSamplePreviews = [];
+
+            // Iterate over selected column rows
+            parsedData.forEach((row, idx) => {
+                const cellText = String(row[selectedCol] || '');
+                if (!cellText.trim()) return;
+
+                const res = analyzer.analyzeText(cellText, options);
+                totalTokens += res.originalTokensCount;
+
+                // Count extracted items (excluding stop words)
+                res.resultItems.forEach(item => {
+                    const words = item.split(' ');
+                    const containsStopword = words.some(w => stopWordsSet.has(w.toLowerCase()));
+                    if (containsStopword || stopWordsSet.has(item.toLowerCase())) return;
+
+                    nounFreqMap.set(item, (nounFreqMap.get(item) || 0) + 1);
+                });
+
+                // Save sample for preview tab (first 10 rows)
+                if (idx < 10) {
+                    rawSamplePreviews.push({
+                        rowIdx: idx + 1,
+                        original: cellText,
+                        extractedNouns: res.extractedNouns,
+                        extractedItems: res.resultItems
+                    });
+                }
+            });
+
+            // Calculate overall sum of frequencies
+            totalNounCount = Array.from(nounFreqMap.values()).reduce((a, b) => a + b, 0);
+
+            // Convert map to sorted array
+            analysisResults = Array.from(nounFreqMap.entries())
+                .map(([word, count]) => ({
+                    word,
+                    count,
+                    percentage: totalNounCount > 0 ? ((count / totalNounCount) * 100).toFixed(2) : 0
+                }))
+                .sort((a, b) => b.count - a.count);
+
+            // Update Metrics Stats UI
+            document.getElementById('statTotalRows').textContent = parsedData.length.toLocaleString();
+            document.getElementById('statTotalTokens').textContent = totalTokens.toLocaleString();
+            document.getElementById('statTotalNouns').textContent = totalNounCount.toLocaleString();
+            document.getElementById('statUniqueNouns').textContent = analysisResults.length.toLocaleString();
+
+            // Unhide Dashboard
+            document.getElementById('resultsSection').classList.remove('hidden');
+
+            // Render Views
+            renderChart();
+            renderWordCloud();
+            renderTable();
+            renderSamplePreview();
+        }
+
+
+        /**
+         * Render Chart.js Bar Graph
+         */
+        function renderChart() {
+            const limit = parseInt(document.getElementById('chartLimit').value, 10);
+            const topData = analysisResults.slice(0, limit);
+
+            const labels = topData.map(d => d.word);
+            const counts = topData.map(d => d.count);
+
+            const ctx = document.getElementById('freqChart').getContext('2d');
+
+            if (chartInstance) {
+                chartInstance.destroy();
+            }
+
+            chartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: '출현 빈도수 (회)',
+                        data: counts,
+                        backgroundColor: 'rgba(79, 70, 229, 0.85)',
+                        borderColor: 'rgba(67, 56, 202, 1)',
+                        borderWidth: 1.5,
+                        borderRadius: 6,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => ` 빈도수: ${context.parsed.y}회 (${((context.parsed.y / (totalNounCount || 1))*100).toFixed(1)}%)`
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: '#f1f5f9' },
+                            ticks: { precision: 0 }
+                        },
+                        x: {
+                            grid: { display: false }
+                        }
+                    }
+                }
+            });
+        }
+
+        /**
+         * Render Interactive Visual Word Cloud
+         */
+        function renderWordCloud() {
+            const container = document.getElementById('wordCloudContainer');
+            container.innerHTML = '';
+
+            if (analysisResults.length === 0) {
+                container.innerHTML = '<p class="text-xs text-slate-400">추출된 명사가 없습니다.</p>';
+                return;
+            }
+
+            const top50 = analysisResults.slice(0, 60);
+            const maxFreq = top50[0].count;
+            const minFreq = top50[top50.length - 1].count;
+
+            const colors = [
+                'bg-indigo-100 text-indigo-800 border-indigo-200',
+                'bg-blue-100 text-blue-800 border-blue-200',
+                'bg-emerald-100 text-emerald-800 border-emerald-200',
+                'bg-purple-100 text-purple-800 border-purple-200',
+                'bg-amber-100 text-amber-800 border-amber-200',
+                'bg-rose-100 text-rose-800 border-rose-200'
+            ];
+
+            top50.forEach((item, index) => {
+                // Calculate font size relative scale (0.75rem to 2.25rem)
+                const scale = maxFreq === minFreq ? 1 : (item.count - minFreq) / (maxFreq - minFreq);
+                const fontSize = 0.75 + scale * 1.5; // rem units
+
+                const colorClass = colors[index % colors.length];
+
+                const chip = document.createElement('span');
+                chip.className = `word-cloud-item border font-semibold ${colorClass}`;
+                chip.style.fontSize = `${fontSize.toFixed(2)}rem`;
+                chip.title = `${item.word}: ${item.count}회 (${item.percentage}%) - 클릭 시 제외`;
+                chip.innerHTML = `${item.word} <span class="text-[10px] opacity-75">(${item.count})</span>`;
+
+                // Click to exclude word as stopword
+                chip.onclick = () => addStopWord(item.word);
+
+                container.appendChild(chip);
+            });
+        }
+
+        /**
+         * Render Detailed Data Table
+         */
+        function renderTable(filterQuery = "") {
+            const tbody = document.getElementById('frequencyTableBody');
+            tbody.innerHTML = '';
+
+            const filtered = analysisResults.filter(r => 
+                r.word.toLowerCase().includes(filterQuery.toLowerCase())
+            );
+
+            document.getElementById('tableResultCount').textContent = `총 ${filtered.length.toLocaleString()}개 단어`;
+
+            filtered.forEach((item, idx) => {
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-50 transition duration-150';
+
+                tr.innerHTML = `
+                    <td class="py-2.5 px-4 text-center font-bold text-slate-400">${idx + 1}</td>
+                    <td class="py-2.5 px-4 font-semibold text-slate-800">${item.word}</td>
+                    <td class="py-2.5 px-4 text-right font-bold text-indigo-600">${item.count.toLocaleString()}</td>
+                    <td class="py-2.5 px-4">
+                        <div class="flex items-center space-x-2">
+                            <div class="w-24 bg-slate-100 rounded-full h-2 overflow-hidden">
+                                <div class="bg-indigo-600 h-2 rounded-full" style="width: ${Math.min(item.percentage * 2, 100)}%"></div>
+                            </div>
+                            <span class="text-[11px] text-slate-500 font-medium">${item.percentage}%</span>
+                        </div>
+                    </td>
+                    <td class="py-2.5 px-4 text-center">
+                        <button onclick="addStopWord('${item.word}')" class="px-2 py-1 text-[11px] bg-slate-100 hover:bg-rose-100 text-slate-600 hover:text-rose-600 rounded transition border border-slate-200">
+                            <i class="fa-solid fa-ban mr-1"></i>제외
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function filterTable() {
+            const q = document.getElementById('tableSearch').value;
+            renderTable(q);
+        }
+
+        /**
+         * Render Sentence Morph Sample Preview
+         */
+        function renderSamplePreview() {
+            const container = document.getElementById('samplePreviewList');
+            container.innerHTML = '';
+
+            rawSamplePreviews.forEach(sample => {
+                const card = document.createElement('div');
+                card.className = 'p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-2';
+
+                const nounBadges = sample.extractedNouns.map(n => 
+                    `<span class="px-2 py-0.5 bg-indigo-100 text-indigo-700 font-medium rounded-md">${n}</span>`
+                ).join(' ');
+
+                const itemBadges = sample.extractedItems.map(item => 
+                    `<span class="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-semibold rounded-md border border-emerald-200">${item}</span>`
+                ).join(' ');
+
+                card.innerHTML = `
+                    <div class="flex justify-between items-center font-semibold text-slate-500">
+                        <span>행 #${sample.rowIdx} 원문</span>
+                    </div>
+                    <p class="text-slate-800 font-medium bg-white p-2.5 rounded-lg border border-slate-200">${sample.original}</p>
+                    <div class="space-y-1">
+                        <div>
+                            <span class="text-[11px] font-bold text-indigo-600 mr-2">개별 명사:</span>
+                            <div class="flex flex-wrap gap-1 mt-1">${nounBadges || '<span class="text-slate-400">추출 없음</span>'}</div>
+                        </div>
+                        <div class="pt-1">
+                            <span class="text-[11px] font-bold text-emerald-600 mr-2">선택 N-Gram 추출 결과:</span>
+                            <div class="flex flex-wrap gap-1 mt-1">${itemBadges || '<span class="text-slate-400">추출 없음</span>'}</div>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        /**
+         * Quick Exclusion / Add Stop Word Action
+         */
+        function addStopWord(word) {
+            const stopInput = document.getElementById('stopWordsInput');
+            let current = stopInput.value.split(',').map(s => s.trim()).filter(Boolean);
+            
+            if (!current.includes(word)) {
+                current.push(word);
+                stopInput.value = current.join(', ');
+                runMorphAnalysis(); // Re-run analysis automatically
+            }
+        }
+
+        /**
+         * UI Tab Switcher
+         */
+        function switchTab(tabKey) {
+            ['chart', 'cloud', 'table', 'preview'].forEach(key => {
+                const content = document.getElementById(`tabContent-${key}`);
+                const btn = document.getElementById(`tabBtn-${key}`);
+                
+                if (key === tabKey) {
+                    content.classList.remove('hidden');
+                    btn.className = "px-4 py-2 text-xs font-semibold rounded-lg bg-indigo-600 text-white shadow-sm transition";
+                } else {
+                    content.classList.add('hidden');
+                    btn.className = "px-4 py-2 text-xs font-semibold rounded-lg bg-slate-200 text-slate-700 hover:bg-slate-300 transition";
+                }
+            });
+        }
+
+        /**
+         * Export Results to CSV File
+         */
+        function exportToCSV() {
+            if (analysisResults.length === 0) {
+                alert("다운로드할 분석 결과가 없습니다.");
+                return;
+            }
+
+            let csvContent = "\uFEFF순위,명사(단어),빈도수,비율(%)\n";
+            analysisResults.forEach((row, idx) => {
+                csvContent += `${idx + 1},"${row.word}",${row.count},${row.percentage}%\n`;
+            });
+
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `형태소_명사_빈도분석_${new Date().toISOString().slice(0,10)}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+
+        /**
+         * Reset App State
+         */
+        function resetAll() {
+            parsedData = [];
+            columnNames = [];
+            analysisResults = [];
+            
+            document.getElementById('fileInput').value = '';
+            document.getElementById('fileStatus').classList.add('hidden');
+            document.getElementById('columnSelect').innerHTML = '<option value="">파일을 먼저 업로드하세요</option>';
+            document.getElementById('columnSelect').disabled = true;
+            document.getElementById('runBtn').disabled = true;
+            document.getElementById('resultsSection').classList.add('hidden');
+        }
+    </script>
+</body>
+</html>
